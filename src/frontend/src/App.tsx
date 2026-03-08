@@ -1,5 +1,12 @@
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+interface BeforeInstallPromptEvent extends Event {
+  prompt(): Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
+}
+
 import { Toaster } from "@/components/ui/sonner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Download } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -30,6 +37,8 @@ export default function App() {
   const [playheadBeats, setPlayheadBeats] = useState(0);
   const [showMicModal, setShowMicModal] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
+  const [installPrompt, setInstallPrompt] = useState<Event | null>(null);
+  const [appInstalled, setAppInstalled] = useState(false);
   const [bottomPanelHeight, setBottomPanelHeight] =
     useState(BOTTOM_PANEL_DEFAULT);
   const playheadRef = useRef(0);
@@ -46,6 +55,44 @@ export default function App() {
       setShowMicModal(true);
     }
   }, []);
+
+  // PWA Install prompt
+  useEffect(() => {
+    // Check if already installed (running as standalone PWA)
+    if (window.matchMedia("(display-mode: standalone)").matches) {
+      setAppInstalled(true);
+      return;
+    }
+
+    const handler = (e: Event) => {
+      e.preventDefault();
+      setInstallPrompt(e);
+    };
+
+    const installedHandler = () => {
+      setAppInstalled(true);
+      setInstallPrompt(null);
+    };
+
+    window.addEventListener("beforeinstallprompt", handler);
+    window.addEventListener("appinstalled", installedHandler);
+
+    return () => {
+      window.removeEventListener("beforeinstallprompt", handler);
+      window.removeEventListener("appinstalled", installedHandler);
+    };
+  }, []);
+
+  const handleInstallApp = useCallback(async () => {
+    if (!installPrompt) return;
+    const prompt = installPrompt as BeforeInstallPromptEvent;
+    prompt.prompt();
+    const { outcome } = await prompt.userChoice;
+    if (outcome === "accepted") {
+      setAppInstalled(true);
+      setInstallPrompt(null);
+    }
+  }, [installPrompt]);
 
   // Sync track nodes when tracks change
   useEffect(() => {
@@ -684,6 +731,49 @@ export default function App() {
           </Tabs>
         </div>
       </div>
+
+      {/* PWA Install Banner */}
+      {!appInstalled && installPrompt && (
+        <div
+          className="shrink-0 flex items-center justify-between px-4 gap-3"
+          style={{
+            background: "oklch(0.16 0.06 195)",
+            borderTop: "1px solid oklch(0.28 0.10 195)",
+            padding: "8px 16px",
+          }}
+        >
+          <div className="flex items-center gap-2">
+            <Download size={14} style={{ color: "oklch(0.78 0.15 195)" }} />
+            <span style={{ fontSize: 12, color: "oklch(0.85 0 0)" }}>
+              Instala o app para usar offline, sem precisar do navegador
+            </span>
+          </div>
+          <button
+            type="button"
+            data-ocid="pwa.install_button"
+            onClick={handleInstallApp}
+            className="flex items-center gap-1 rounded px-3 py-1 text-xs font-semibold transition-all"
+            style={{
+              background: "oklch(0.55 0.18 195)",
+              color: "oklch(0.98 0 0)",
+              border: "none",
+              cursor: "pointer",
+              whiteSpace: "nowrap",
+            }}
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.background =
+                "oklch(0.65 0.18 195)";
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.background =
+                "oklch(0.55 0.18 195)";
+            }}
+          >
+            <Download size={12} />
+            Baixar APP
+          </button>
+        </div>
+      )}
 
       {/* Footer */}
       <footer
