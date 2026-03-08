@@ -1,6 +1,7 @@
 import {
   ChevronDown,
   ChevronUp,
+  Disc3,
   GripVertical,
   Plus,
   Power,
@@ -406,35 +407,60 @@ export function EffectsChainPanel({
 }: EffectsChainPanelProps) {
   const [showPicker, setShowPicker] = useState(false);
   const [isMasterSelected, setIsMasterSelected] = useState(false);
+  const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
 
   const selectedTrack = state.selectedTrackId
     ? (state.tracks.find((t) => t.id === state.selectedTrackId) ?? null)
     : null;
 
+  const selectedClip =
+    selectedClipId && selectedTrack
+      ? (selectedTrack.clips.find((c) => c.id === selectedClipId) ?? null)
+      : null;
+
+  // Determine what chain to show: clip > track > master
   const effectsChain = isMasterSelected
     ? state.masterFXChain
-    : (selectedTrack?.effectsChain ?? []);
+    : selectedClip
+      ? selectedClip.effectsChain
+      : (selectedTrack?.effectsChain ?? []);
 
-  const trackLabel = isMasterSelected
+  const chainLabel = isMasterSelected
     ? "Master"
-    : (selectedTrack?.name ?? "No Track Selected");
+    : selectedClip
+      ? `${selectedTrack?.name ?? "Track"} — Clip ${(selectedTrack?.clips.findIndex((c) => c.id === selectedClipId) ?? 0) + 1} FX`
+      : `${selectedTrack?.name ?? "No Track Selected"} — Track FX`;
 
   const handleAddFX = useCallback(
     (type: FXType) => {
       const fx = createFXSlot(type);
       if (isMasterSelected) {
         dispatch({ type: "ADD_FX_TO_MASTER", fx });
+      } else if (selectedClip && selectedTrack) {
+        dispatch({
+          type: "ADD_FX_TO_CLIP",
+          trackId: selectedTrack.id,
+          clipId: selectedClip.id,
+          fx,
+        });
       } else if (selectedTrack) {
         dispatch({ type: "ADD_FX_TO_TRACK", trackId: selectedTrack.id, fx });
       }
     },
-    [createFXSlot, dispatch, isMasterSelected, selectedTrack],
+    [createFXSlot, dispatch, isMasterSelected, selectedClip, selectedTrack],
   );
 
   const handleRemoveFX = useCallback(
     (fxId: string) => {
       if (isMasterSelected) {
         dispatch({ type: "REMOVE_FX_FROM_MASTER", fxId });
+      } else if (selectedClip && selectedTrack) {
+        dispatch({
+          type: "REMOVE_FX_FROM_CLIP",
+          trackId: selectedTrack.id,
+          clipId: selectedClip.id,
+          fxId,
+        });
       } else if (selectedTrack) {
         dispatch({
           type: "REMOVE_FX_FROM_TRACK",
@@ -443,24 +469,40 @@ export function EffectsChainPanel({
         });
       }
     },
-    [dispatch, isMasterSelected, selectedTrack],
+    [dispatch, isMasterSelected, selectedClip, selectedTrack],
   );
 
   const handleToggleFX = useCallback(
     (fxId: string) => {
       if (isMasterSelected) {
         dispatch({ type: "TOGGLE_MASTER_FX_BYPASS", fxId });
+      } else if (selectedClip && selectedTrack) {
+        dispatch({
+          type: "TOGGLE_CLIP_FX_BYPASS",
+          trackId: selectedTrack.id,
+          clipId: selectedClip.id,
+          fxId,
+        });
       } else if (selectedTrack) {
         dispatch({ type: "TOGGLE_FX_BYPASS", trackId: selectedTrack.id, fxId });
       }
     },
-    [dispatch, isMasterSelected, selectedTrack],
+    [dispatch, isMasterSelected, selectedClip, selectedTrack],
   );
 
   const handleParamChange = useCallback(
     (fxId: string, key: string, value: number | string | boolean) => {
       if (isMasterSelected) {
         dispatch({ type: "UPDATE_MASTER_FX_PARAM", fxId, key, value });
+      } else if (selectedClip && selectedTrack) {
+        dispatch({
+          type: "UPDATE_CLIP_FX_PARAM",
+          trackId: selectedTrack.id,
+          clipId: selectedClip.id,
+          fxId,
+          key,
+          value,
+        });
       } else if (selectedTrack) {
         dispatch({
           type: "UPDATE_FX_PARAM",
@@ -471,11 +513,12 @@ export function EffectsChainPanel({
         });
       }
     },
-    [dispatch, isMasterSelected, selectedTrack],
+    [dispatch, isMasterSelected, selectedClip, selectedTrack],
   );
 
   const handleMove = useCallback(
     (fromIndex: number, toIndex: number) => {
+      // Only support track-level FX reordering for now (clip FX can be added later)
       dispatch({
         type: "MOVE_FX",
         trackId: isMasterSelected ? null : (selectedTrack?.id ?? null),
@@ -494,46 +537,64 @@ export function EffectsChainPanel({
     >
       {/* Header bar */}
       <div
-        className="flex items-center gap-2 px-3 py-1.5 border-b shrink-0"
+        className="flex items-center gap-1 px-2 py-1.5 border-b shrink-0 overflow-x-auto"
         style={{
           borderColor: "oklch(0.20 0 0)",
           background: "oklch(0.14 0 0)",
+          scrollbarWidth: "none",
         }}
       >
-        {/* Track selector */}
-        <div className="flex gap-1">
-          {state.tracks.slice(0, 6).map((track) => (
-            <button
-              type="button"
-              key={track.id}
-              className="px-2 py-0.5 rounded text-[10px] transition-all"
-              style={{
-                background:
-                  state.selectedTrackId === track.id && !isMasterSelected
-                    ? `${track.color}40`
-                    : "oklch(0.18 0 0)",
-                color:
-                  state.selectedTrackId === track.id && !isMasterSelected
-                    ? track.color
-                    : "oklch(0.50 0 0)",
-                border: `1px solid ${state.selectedTrackId === track.id && !isMasterSelected ? `${track.color}60` : "oklch(0.24 0 0)"}`,
-                maxWidth: 80,
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-              onClick={() => {
-                dispatch({ type: "SELECT_TRACK", id: track.id });
-                setIsMasterSelected(false);
-              }}
-              title={track.name}
-            >
-              {track.name}
-            </button>
-          ))}
+        {/* Track selector — scrollable, no limit */}
+        <div className="flex gap-1 shrink-0">
+          {state.tracks.map((track) => {
+            const isActive =
+              state.selectedTrackId === track.id && !isMasterSelected;
+            return (
+              <button
+                type="button"
+                key={track.id}
+                className="px-2 py-0.5 rounded text-[10px] transition-all shrink-0 flex items-center gap-1"
+                style={{
+                  background: isActive ? `${track.color}40` : "oklch(0.18 0 0)",
+                  color: isActive ? track.color : "oklch(0.50 0 0)",
+                  border: `1px solid ${isActive ? `${track.color}60` : "oklch(0.24 0 0)"}`,
+                  maxWidth: 90,
+                  whiteSpace: "nowrap",
+                }}
+                onClick={() => {
+                  dispatch({ type: "SELECT_TRACK", id: track.id });
+                  setIsMasterSelected(false);
+                  setSelectedClipId(null);
+                }}
+                title={`${track.name} (${track.effectsChain.length} FX)`}
+              >
+                <span className="truncate" style={{ maxWidth: 60 }}>
+                  {track.name}
+                </span>
+                {track.effectsChain.length > 0 && (
+                  <span
+                    className="rounded-full flex items-center justify-center shrink-0"
+                    style={{
+                      width: 13,
+                      height: 13,
+                      background: isActive
+                        ? `${track.color}30`
+                        : "oklch(0.22 0 0)",
+                      color: isActive ? track.color : "oklch(0.50 0 0)",
+                      fontSize: 8,
+                      fontFamily: "JetBrains Mono, monospace",
+                      fontWeight: 700,
+                    }}
+                  >
+                    {track.effectsChain.length}
+                  </span>
+                )}
+              </button>
+            );
+          })}
           <button
             type="button"
-            className="px-2 py-0.5 rounded text-[10px] transition-all"
+            className="px-2 py-0.5 rounded text-[10px] transition-all shrink-0"
             style={{
               background: isMasterSelected
                 ? "oklch(0.78 0.15 195 / 0.3)"
@@ -542,17 +603,24 @@ export function EffectsChainPanel({
                 ? "oklch(0.78 0.15 195)"
                 : "oklch(0.50 0 0)",
               border: `1px solid ${isMasterSelected ? "oklch(0.78 0.15 195 / 0.5)" : "oklch(0.24 0 0)"}`,
+              whiteSpace: "nowrap",
             }}
-            onClick={() => setIsMasterSelected(true)}
+            onClick={() => {
+              setIsMasterSelected(true);
+              setSelectedClipId(null);
+            }}
           >
             Master
           </button>
         </div>
 
-        <div className="flex-1" />
+        <div className="flex-1 shrink-0" style={{ minWidth: 4 }} />
 
         {/* FX count */}
-        <span className="text-[10px]" style={{ color: "oklch(0.38 0 0)" }}>
+        <span
+          className="text-[10px] shrink-0"
+          style={{ color: "oklch(0.38 0 0)" }}
+        >
           {effectsChain.length} FX
         </span>
 
@@ -560,7 +628,7 @@ export function EffectsChainPanel({
         <button
           type="button"
           data-ocid="fx.add_button"
-          className="daw-btn gap-1 h-6"
+          className="daw-btn gap-1 h-6 shrink-0"
           onClick={() => setShowPicker(true)}
           style={{
             background: "oklch(0.78 0.15 195 / 0.2)",
@@ -572,6 +640,72 @@ export function EffectsChainPanel({
           <span className="text-[10px]">Add FX</span>
         </button>
       </div>
+
+      {/* Clip selector row — shows clips if a track with clips is selected */}
+      {selectedTrack && selectedTrack.clips.length > 0 && !isMasterSelected && (
+        <div
+          className="flex items-center gap-1 px-2 py-1 border-b shrink-0 overflow-x-auto"
+          style={{
+            borderColor: "oklch(0.18 0 0)",
+            background: "oklch(0.13 0 0)",
+            scrollbarWidth: "none",
+          }}
+        >
+          <Disc3 size={9} style={{ color: "oklch(0.45 0 0)", flexShrink: 0 }} />
+          <span
+            className="text-[9px] mr-1 shrink-0"
+            style={{ color: "oklch(0.40 0 0)" }}
+          >
+            Clip FX:
+          </span>
+          <button
+            type="button"
+            className="px-2 py-0.5 rounded text-[9px] transition-all shrink-0"
+            style={{
+              background:
+                selectedClipId === null ? "oklch(0.22 0 0)" : "oklch(0.17 0 0)",
+              color:
+                selectedClipId === null ? "oklch(0.80 0 0)" : "oklch(0.42 0 0)",
+              border: `1px solid ${selectedClipId === null ? "oklch(0.30 0 0)" : "oklch(0.22 0 0)"}`,
+            }}
+            onClick={() => setSelectedClipId(null)}
+          >
+            Track FX
+          </button>
+          {selectedTrack.clips.map((clip, ci) => (
+            <button
+              type="button"
+              key={clip.id}
+              className="px-2 py-0.5 rounded text-[9px] transition-all shrink-0 flex items-center gap-1"
+              style={{
+                background:
+                  selectedClipId === clip.id
+                    ? `${selectedTrack.color}40`
+                    : "oklch(0.17 0 0)",
+                color:
+                  selectedClipId === clip.id
+                    ? selectedTrack.color
+                    : "oklch(0.42 0 0)",
+                border: `1px solid ${selectedClipId === clip.id ? `${selectedTrack.color}60` : "oklch(0.22 0 0)"}`,
+              }}
+              onClick={() => setSelectedClipId(clip.id)}
+            >
+              <span>Clip {ci + 1}</span>
+              {clip.effectsChain.length > 0 && (
+                <span
+                  style={{
+                    fontSize: 8,
+                    fontFamily: "JetBrains Mono, monospace",
+                    opacity: 0.8,
+                  }}
+                >
+                  ({clip.effectsChain.length})
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Chain label */}
       <div
@@ -585,11 +719,11 @@ export function EffectsChainPanel({
           className="text-[10px] font-semibold"
           style={{ color: "oklch(0.55 0 0)" }}
         >
-          {trackLabel} — FX Chain
+          {chainLabel}
         </span>
         {effectsChain.length === 0 && (
           <span className="text-[10px]" style={{ color: "oklch(0.35 0 0)" }}>
-            (empty)
+            (empty — add up to 5 or more FX)
           </span>
         )}
       </div>

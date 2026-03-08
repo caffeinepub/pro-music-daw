@@ -2,6 +2,16 @@
 
 export type TransportState = "stopped" | "playing" | "recording" | "paused";
 
+export interface AudioClip {
+  id: string;
+  startBeat: number;
+  durationBeats: number;
+  audioBuffer?: AudioBuffer;
+  audioFileName?: string;
+  bufferOffset?: number; // start offset within the original buffer in seconds
+  effectsChain: FXSlot[];
+}
+
 export interface DAWTrack {
   id: string;
   name: string;
@@ -16,6 +26,7 @@ export interface DAWTrack {
   audioFileName?: string;
   effectsChain: FXSlot[];
   midiNotes: MidiNote[];
+  clips: AudioClip[]; // per-clip audio segments
 }
 
 export interface MidiNote {
@@ -133,7 +144,12 @@ export interface LoopRegion {
   endBeat: number;
 }
 
-export type BottomPanelTab = "mixer" | "fx" | "pianoroll" | "analyzer";
+export type BottomPanelTab =
+  | "mixer"
+  | "fx"
+  | "pianoroll"
+  | "analyzer"
+  | "settings";
 
 export interface AudioEngine {
   audioContext: AudioContext | null;
@@ -486,21 +502,17 @@ export const FX_CATALOG: FXDefinition[] = [
     name: "Graphic EQ",
     category: "eq",
     defaultParams: {
-      b31: 0,
-      b63: 0,
-      b125: 0,
-      b250: 0,
-      b500: 0,
-      b1k: 0,
-      b2k: 0,
-      b4k: 0,
-      b8k: 0,
-      b16k: 0,
+      b1: 0,
+      b2: 0,
+      b3: 0,
+      b4: 0,
+      b5: 0,
+      b6: 0,
     },
     paramDefs: [
       {
-        key: "b31",
-        label: "31Hz",
+        key: "b1",
+        label: "80Hz",
         type: "slider",
         min: -12,
         max: 12,
@@ -508,25 +520,7 @@ export const FX_CATALOG: FXDefinition[] = [
         unit: "dB",
       },
       {
-        key: "b63",
-        label: "63Hz",
-        type: "slider",
-        min: -12,
-        max: 12,
-        default: 0,
-        unit: "dB",
-      },
-      {
-        key: "b125",
-        label: "125Hz",
-        type: "slider",
-        min: -12,
-        max: 12,
-        default: 0,
-        unit: "dB",
-      },
-      {
-        key: "b250",
+        key: "b2",
         label: "250Hz",
         type: "slider",
         min: -12,
@@ -535,8 +529,8 @@ export const FX_CATALOG: FXDefinition[] = [
         unit: "dB",
       },
       {
-        key: "b500",
-        label: "500Hz",
+        key: "b3",
+        label: "800Hz",
         type: "slider",
         min: -12,
         max: 12,
@@ -544,8 +538,8 @@ export const FX_CATALOG: FXDefinition[] = [
         unit: "dB",
       },
       {
-        key: "b1k",
-        label: "1kHz",
+        key: "b4",
+        label: "2.5kHz",
         type: "slider",
         min: -12,
         max: 12,
@@ -553,25 +547,7 @@ export const FX_CATALOG: FXDefinition[] = [
         unit: "dB",
       },
       {
-        key: "b2k",
-        label: "2kHz",
-        type: "slider",
-        min: -12,
-        max: 12,
-        default: 0,
-        unit: "dB",
-      },
-      {
-        key: "b4k",
-        label: "4kHz",
-        type: "slider",
-        min: -12,
-        max: 12,
-        default: 0,
-        unit: "dB",
-      },
-      {
-        key: "b8k",
+        key: "b5",
         label: "8kHz",
         type: "slider",
         min: -12,
@@ -580,7 +556,7 @@ export const FX_CATALOG: FXDefinition[] = [
         unit: "dB",
       },
       {
-        key: "b16k",
+        key: "b6",
         label: "16kHz",
         type: "slider",
         min: -12,
@@ -1462,6 +1438,7 @@ export const DEFAULT_PROJECT_TRACKS: Omit<DAWTrack, "id">[] = [
     order: 0,
     effectsChain: [],
     midiNotes: [],
+    clips: [],
   },
   {
     name: "Harmony Vox",
@@ -1474,6 +1451,7 @@ export const DEFAULT_PROJECT_TRACKS: Omit<DAWTrack, "id">[] = [
     order: 1,
     effectsChain: [],
     midiNotes: [],
+    clips: [],
   },
   {
     name: "Guitar",
@@ -1486,6 +1464,7 @@ export const DEFAULT_PROJECT_TRACKS: Omit<DAWTrack, "id">[] = [
     order: 2,
     effectsChain: [],
     midiNotes: [],
+    clips: [],
   },
   {
     name: "Bass",
@@ -1498,6 +1477,7 @@ export const DEFAULT_PROJECT_TRACKS: Omit<DAWTrack, "id">[] = [
     order: 3,
     effectsChain: [],
     midiNotes: [],
+    clips: [],
   },
   {
     name: "Drums",
@@ -1510,6 +1490,7 @@ export const DEFAULT_PROJECT_TRACKS: Omit<DAWTrack, "id">[] = [
     order: 4,
     effectsChain: [],
     midiNotes: [],
+    clips: [],
   },
   {
     name: "Synth Lead",
@@ -1522,6 +1503,7 @@ export const DEFAULT_PROJECT_TRACKS: Omit<DAWTrack, "id">[] = [
     order: 5,
     effectsChain: [],
     midiNotes: [],
+    clips: [],
   },
 ];
 

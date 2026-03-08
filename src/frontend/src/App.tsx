@@ -4,8 +4,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { EffectsChainPanel } from "./components/EffectsChainPanel";
+import { ExportModal } from "./components/ExportModal";
+import { MicPermissionModal } from "./components/MicPermissionModal";
 import { MixerPanel } from "./components/MixerPanel";
 import { PianoRollPanel } from "./components/PianoRollPanel";
+import { SettingsPanel } from "./components/SettingsPanel";
 import { SpectrumAnalyzer } from "./components/SpectrumAnalyzer";
 import { TopToolbar } from "./components/TopToolbar";
 import { TrackArea } from "./components/TrackArea";
@@ -14,7 +17,9 @@ import { useAudioEngine } from "./hooks/useAudioEngine";
 import { useDAWState } from "./hooks/useDAWState";
 import type { BottomPanelTab } from "./types/daw";
 
-const BOTTOM_PANEL_HEIGHT = 280;
+const BOTTOM_PANEL_MIN = 120;
+const BOTTOM_PANEL_MAX = 500;
+const BOTTOM_PANEL_DEFAULT = 280;
 
 export default function App() {
   const { state, dispatch, addTrack, createFXSlot } = useDAWState();
@@ -23,9 +28,24 @@ export default function App() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [playheadBeats, setPlayheadBeats] = useState(0);
+  const [showMicModal, setShowMicModal] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [bottomPanelHeight, setBottomPanelHeight] =
+    useState(BOTTOM_PANEL_DEFAULT);
   const playheadRef = useRef(0);
   const rafRef = useRef<number>(0);
   const recordingTrackIdRef = useRef<string | null>(null);
+  const panelResizeRef = useRef<{ startY: number; startH: number } | null>(
+    null,
+  );
+
+  // Show mic permission modal on first load
+  useEffect(() => {
+    const granted = localStorage.getItem("mic_permission_granted");
+    if (!granted) {
+      setShowMicModal(true);
+    }
+  }, []);
 
   // Sync track nodes when tracks change
   useEffect(() => {
@@ -245,15 +265,32 @@ export default function App() {
         trackId = addTrack(file.name.replace(/\.[^/.]+$/, ""));
       }
 
+      const durationBeats = (buffer.duration * state.project.bpm) / 60;
+      const clipId = Math.random().toString(36).slice(2, 10);
+
       dispatch({
         type: "UPDATE_TRACK",
         id: trackId,
         updates: { audioBuffer: buffer, audioFileName: file.name },
       });
 
+      // Also add a clip at beat 0
+      dispatch({
+        type: "ADD_CLIP_TO_TRACK",
+        trackId,
+        clip: {
+          id: clipId,
+          startBeat: playheadRef.current,
+          durationBeats,
+          audioBuffer: buffer,
+          audioFileName: file.name,
+          effectsChain: [],
+        },
+      });
+
       toast.success(`Loaded: ${file.name}`);
     },
-    [audio, state.tracks, addTrack, dispatch],
+    [audio, state.tracks, state.project.bpm, addTrack, dispatch],
   );
 
   const handleExport = useCallback(async () => {
@@ -285,6 +322,76 @@ export default function App() {
     URL.revokeObjectURL(url);
     toast.success("Project exported as WAV");
   }, [audio, state.tracks, state.project]);
+
+  const handleImportFile = useCallback(
+    async (file: File) => {
+      const buffer = await audio.loadAudioBuffer(file);
+      if (!buffer) {
+        toast.error(`Falha ao carregar: ${file.name}`);
+        return;
+      }
+      // Try to load into selected track, else first available, else new track
+      const targetTrack =
+        state.tracks.find((t) => t.id === state.selectedTrackId) ??
+        state.tracks.find((t) => !t.audioBuffer) ??
+        null;
+
+      let trackId: string;
+      if (targetTrack) {
+        trackId = targetTrack.id;
+      } else {
+        trackId = addTrack(file.name.replace(/\.[^/.]+$/, ""));
+      }
+
+      const durationBeats = (buffer.duration * state.project.bpm) / 60;
+      const clipId = Math.random().toString(36).slice(2, 10);
+
+      dispatch({
+        type: "UPDATE_TRACK",
+        id: trackId,
+        updates: { audioBuffer: buffer, audioFileName: file.name },
+      });
+
+      // Also add a clip at playhead position
+      dispatch({
+        type: "ADD_CLIP_TO_TRACK",
+        trackId,
+        clip: {
+          id: clipId,
+          startBeat: playheadRef.current,
+          durationBeats,
+          audioBuffer: buffer,
+          audioFileName: file.name,
+          effectsChain: [],
+        },
+      });
+
+      toast.success(`Importado: ${file.name}`);
+    },
+    [
+      audio,
+      state.tracks,
+      state.selectedTrackId,
+      state.project.bpm,
+      addTrack,
+      dispatch,
+    ],
+  );
+
+  const handleClearProject = useCallback(() => {
+    dispatch({ type: "SET_TRACKS", tracks: [] });
+    dispatch({
+      type: "SET_PROJECT",
+      project: {
+        id: Math.random().toString(36).slice(2, 10),
+        name: "New Project",
+        bpm: 120,
+        timeSignatureNumerator: 4,
+        timeSignatureDenominator: 4,
+      },
+    });
+    toast.success("Project cleared");
+  }, [dispatch]);
 
   const handlePlayNote = useCallback(
     async (midi: number) => {
@@ -370,6 +477,25 @@ export default function App() {
         }}
       />
 
+      {/* Mic Permission Modal */}
+      {showMicModal && (
+        <MicPermissionModal
+          onGranted={() => setShowMicModal(false)}
+          onDismiss={() => setShowMicModal(false)}
+        />
+      )}
+
+      {/* Export/Import Modal */}
+      {showExportModal && (
+        <ExportModal
+          tracks={state.tracks}
+          project={state.project}
+          onExportWav={handleExport}
+          onImportFile={handleImportFile}
+          onClose={() => setShowExportModal(false)}
+        />
+      )}
+
       {/* Top Toolbar */}
       <TopToolbar
         state={state}
@@ -382,6 +508,11 @@ export default function App() {
         onRecord={handleRecord}
         onRewind={handleRewind}
         onExport={handleExport}
+        onOpenExportModal={() => setShowExportModal(true)}
+        onImportFile={handleImportFile}
+        onOpenSettings={() =>
+          dispatch({ type: "SET_BOTTOM_PANEL_TAB", tab: "settings" })
+        }
       />
 
       {/* Main Content Area */}
@@ -401,13 +532,56 @@ export default function App() {
         <div
           className="shrink-0 border-t"
           style={{
-            height: BOTTOM_PANEL_HEIGHT,
+            height: bottomPanelHeight,
             borderColor: "oklch(0.22 0 0)",
             background: "oklch(0.12 0 0)",
             display: "flex",
             flexDirection: "column",
+            position: "relative",
           }}
         >
+          {/* Drag handle to resize panel */}
+          <div
+            data-ocid="panel.drag_handle"
+            className="absolute top-0 left-0 right-0 cursor-ns-resize flex items-center justify-center"
+            style={{ height: 6, zIndex: 10 }}
+            onMouseDown={(e) => {
+              panelResizeRef.current = {
+                startY: e.clientY,
+                startH: bottomPanelHeight,
+              };
+              const onMove = (ev: MouseEvent) => {
+                if (!panelResizeRef.current) return;
+                const delta = panelResizeRef.current.startY - ev.clientY;
+                const newH = Math.max(
+                  BOTTOM_PANEL_MIN,
+                  Math.min(
+                    BOTTOM_PANEL_MAX,
+                    panelResizeRef.current.startH + delta,
+                  ),
+                );
+                setBottomPanelHeight(newH);
+              };
+              const onUp = () => {
+                panelResizeRef.current = null;
+                window.removeEventListener("mousemove", onMove);
+                window.removeEventListener("mouseup", onUp);
+              };
+              window.addEventListener("mousemove", onMove);
+              window.addEventListener("mouseup", onUp);
+            }}
+          >
+            <div
+              className="rounded-full"
+              style={{
+                width: 32,
+                height: 3,
+                background: "oklch(0.28 0 0)",
+                marginTop: 1,
+              }}
+            />
+          </div>
+
           <Tabs
             value={state.bottomPanelTab}
             onValueChange={(v) =>
@@ -424,23 +598,31 @@ export default function App() {
               style={{
                 borderColor: "oklch(0.20 0 0)",
                 background: "oklch(0.13 0 0)",
+                paddingTop: 4,
               }}
             >
               <TabsList className="h-8 gap-0 rounded-none bg-transparent p-0">
                 {(
-                  ["mixer", "fx", "pianoroll", "analyzer"] as BottomPanelTab[]
+                  [
+                    "mixer",
+                    "fx",
+                    "pianoroll",
+                    "analyzer",
+                    "settings",
+                  ] as BottomPanelTab[]
                 ).map((tab) => {
                   const labels: Record<BottomPanelTab, string> = {
                     mixer: "Mixer",
                     fx: "FX Chain",
                     pianoroll: "Piano Roll",
                     analyzer: "Analyzer",
+                    settings: "Settings",
                   };
                   return (
                     <TabsTrigger
                       key={tab}
                       value={tab}
-                      data-ocid={`${tab === "fx" ? "fx" : tab === "pianoroll" ? "pianoroll" : tab === "analyzer" ? "analyzer" : "mixer"}.panel`}
+                      data-ocid={`${tab}.panel`}
                       className="rounded-none text-xs px-4 h-full data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-b-2"
                       style={{
                         color:
@@ -490,6 +672,13 @@ export default function App() {
 
               <TabsContent value="analyzer" className="h-full m-0 p-0">
                 <SpectrumAnalyzer getSpectrumData={audio.getSpectrumData} />
+              </TabsContent>
+
+              <TabsContent value="settings" className="h-full m-0 p-0">
+                <SettingsPanel
+                  state={state}
+                  onClearProject={handleClearProject}
+                />
               </TabsContent>
             </div>
           </Tabs>

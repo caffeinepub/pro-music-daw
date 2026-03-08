@@ -1,5 +1,6 @@
 import { useCallback, useReducer } from "react";
 import {
+  type AudioClip,
   type BottomPanelTab,
   type DAWProject,
   type DAWTrack,
@@ -16,6 +17,8 @@ export interface DAWState {
   project: DAWProject;
   tracks: DAWTrack[];
   selectedTrackId: string | null;
+  selectedClipId: string | null; // per-clip FX selection
+  activeToolMode: "select" | "scissors"; // tool mode
   bottomPanelTab: BottomPanelTab;
   zoom: number; // pixels per beat
   scrollX: number;
@@ -35,6 +38,8 @@ export type DAWAction =
   | { type: "UPDATE_TRACK"; id: string; updates: Partial<DAWTrack> }
   | { type: "REMOVE_TRACK"; id: string }
   | { type: "SELECT_TRACK"; id: string | null }
+  | { type: "SELECT_CLIP"; clipId: string | null }
+  | { type: "SET_TOOL_MODE"; mode: "select" | "scissors" }
   | { type: "SET_BOTTOM_PANEL_TAB"; tab: BottomPanelTab }
   | { type: "SET_ZOOM"; zoom: number }
   | { type: "SET_SCROLL_X"; scrollX: number }
@@ -75,6 +80,37 @@ export type DAWAction =
       trackId: string | null;
       fromIndex: number;
       toIndex: number;
+    }
+  // Clip actions
+  | { type: "ADD_CLIP_TO_TRACK"; trackId: string; clip: AudioClip }
+  | { type: "REMOVE_CLIP_FROM_TRACK"; trackId: string; clipId: string }
+  | {
+      type: "UPDATE_CLIP";
+      trackId: string;
+      clipId: string;
+      updates: Partial<AudioClip>;
+    }
+  | { type: "SPLIT_CLIP"; trackId: string; clipId: string; atBeat: number }
+  | { type: "ADD_FX_TO_CLIP"; trackId: string; clipId: string; fx: FXSlot }
+  | {
+      type: "REMOVE_FX_FROM_CLIP";
+      trackId: string;
+      clipId: string;
+      fxId: string;
+    }
+  | {
+      type: "UPDATE_CLIP_FX_PARAM";
+      trackId: string;
+      clipId: string;
+      fxId: string;
+      key: string;
+      value: number | string | boolean;
+    }
+  | {
+      type: "TOGGLE_CLIP_FX_BYPASS";
+      trackId: string;
+      clipId: string;
+      fxId: string;
     };
 
 function dawReducer(state: DAWState, action: DAWAction): DAWState {
@@ -100,7 +136,11 @@ function dawReducer(state: DAWState, action: DAWAction): DAWState {
           state.selectedTrackId === action.id ? null : state.selectedTrackId,
       };
     case "SELECT_TRACK":
-      return { ...state, selectedTrackId: action.id };
+      return { ...state, selectedTrackId: action.id, selectedClipId: null };
+    case "SELECT_CLIP":
+      return { ...state, selectedClipId: action.clipId };
+    case "SET_TOOL_MODE":
+      return { ...state, activeToolMode: action.mode };
     case "SET_BOTTOM_PANEL_TAB":
       return { ...state, bottomPanelTab: action.tab };
     case "SET_ZOOM":
@@ -268,6 +308,182 @@ function dawReducer(state: DAWState, action: DAWAction): DAWState {
         }),
       };
     }
+    // Clip actions
+    case "ADD_CLIP_TO_TRACK":
+      return {
+        ...state,
+        tracks: state.tracks.map((t) =>
+          t.id === action.trackId
+            ? { ...t, clips: [...t.clips, action.clip] }
+            : t,
+        ),
+      };
+    case "REMOVE_CLIP_FROM_TRACK":
+      return {
+        ...state,
+        tracks: state.tracks.map((t) =>
+          t.id === action.trackId
+            ? { ...t, clips: t.clips.filter((c) => c.id !== action.clipId) }
+            : t,
+        ),
+        selectedClipId:
+          state.selectedClipId === action.clipId ? null : state.selectedClipId,
+      };
+    case "UPDATE_CLIP":
+      return {
+        ...state,
+        tracks: state.tracks.map((t) =>
+          t.id === action.trackId
+            ? {
+                ...t,
+                clips: t.clips.map((c) =>
+                  c.id === action.clipId ? { ...c, ...action.updates } : c,
+                ),
+              }
+            : t,
+        ),
+      };
+    case "SPLIT_CLIP": {
+      const track = state.tracks.find((t) => t.id === action.trackId);
+      if (!track) return state;
+      const clip = track.clips.find((c) => c.id === action.clipId);
+      if (!clip) return state;
+      const splitBeat = action.atBeat;
+      if (
+        splitBeat <= clip.startBeat ||
+        splitBeat >= clip.startBeat + clip.durationBeats
+      )
+        return state;
+
+      const leftDuration = splitBeat - clip.startBeat;
+      const rightDuration = clip.durationBeats - leftDuration;
+
+      const leftClip: AudioClip = {
+        ...clip,
+        id: generateId(),
+        durationBeats: leftDuration,
+        effectsChain: clip.effectsChain.map((f) => ({
+          ...f,
+          id: generateId(),
+        })),
+      };
+      const rightClip: AudioClip = {
+        ...clip,
+        id: generateId(),
+        startBeat: splitBeat,
+        durationBeats: rightDuration,
+        bufferOffset: (clip.bufferOffset ?? 0) + leftDuration, // approximate
+        effectsChain: clip.effectsChain.map((f) => ({
+          ...f,
+          id: generateId(),
+        })),
+      };
+
+      return {
+        ...state,
+        tracks: state.tracks.map((t) =>
+          t.id === action.trackId
+            ? {
+                ...t,
+                clips: [
+                  ...t.clips.filter((c) => c.id !== action.clipId),
+                  leftClip,
+                  rightClip,
+                ],
+              }
+            : t,
+        ),
+      };
+    }
+    case "ADD_FX_TO_CLIP":
+      return {
+        ...state,
+        tracks: state.tracks.map((t) =>
+          t.id === action.trackId
+            ? {
+                ...t,
+                clips: t.clips.map((c) =>
+                  c.id === action.clipId
+                    ? { ...c, effectsChain: [...c.effectsChain, action.fx] }
+                    : c,
+                ),
+              }
+            : t,
+        ),
+      };
+    case "REMOVE_FX_FROM_CLIP":
+      return {
+        ...state,
+        tracks: state.tracks.map((t) =>
+          t.id === action.trackId
+            ? {
+                ...t,
+                clips: t.clips.map((c) =>
+                  c.id === action.clipId
+                    ? {
+                        ...c,
+                        effectsChain: c.effectsChain.filter(
+                          (f) => f.id !== action.fxId,
+                        ),
+                      }
+                    : c,
+                ),
+              }
+            : t,
+        ),
+      };
+    case "UPDATE_CLIP_FX_PARAM":
+      return {
+        ...state,
+        tracks: state.tracks.map((t) =>
+          t.id === action.trackId
+            ? {
+                ...t,
+                clips: t.clips.map((c) =>
+                  c.id === action.clipId
+                    ? {
+                        ...c,
+                        effectsChain: c.effectsChain.map((f) =>
+                          f.id === action.fxId
+                            ? {
+                                ...f,
+                                params: {
+                                  ...f.params,
+                                  [action.key]: action.value,
+                                },
+                              }
+                            : f,
+                        ),
+                      }
+                    : c,
+                ),
+              }
+            : t,
+        ),
+      };
+    case "TOGGLE_CLIP_FX_BYPASS":
+      return {
+        ...state,
+        tracks: state.tracks.map((t) =>
+          t.id === action.trackId
+            ? {
+                ...t,
+                clips: t.clips.map((c) =>
+                  c.id === action.clipId
+                    ? {
+                        ...c,
+                        effectsChain: c.effectsChain.map((f) =>
+                          f.id === action.fxId
+                            ? { ...f, enabled: !f.enabled }
+                            : f,
+                        ),
+                      }
+                    : c,
+                ),
+              }
+            : t,
+        ),
+      };
     default:
       return state;
   }
@@ -297,6 +513,8 @@ const initialState: DAWState = {
   project: defaultProject,
   tracks: createDefaultTracks(),
   selectedTrackId: null,
+  selectedClipId: null,
+  activeToolMode: "select",
   bottomPanelTab: "mixer",
   zoom: 80,
   scrollX: 0,
@@ -326,6 +544,7 @@ export function useDAWState() {
         order: state.tracks.length,
         effectsChain: [],
         midiNotes: [],
+        clips: [],
       };
       dispatch({ type: "ADD_TRACK", track });
       return track.id;

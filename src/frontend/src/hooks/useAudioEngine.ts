@@ -310,7 +310,13 @@ export function useAudioEngine() {
       try {
         await ensureContext();
         const stream = await navigator.mediaDevices.getUserMedia({
-          audio: true,
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: false,
+            sampleRate: 48000,
+            channelCount: 1,
+          },
         });
         const mediaRecorder = new MediaRecorder(stream);
         const chunks: Blob[] = [];

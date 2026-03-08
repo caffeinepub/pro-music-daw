@@ -4,13 +4,16 @@ import {
   Music,
   Play,
   Repeat,
+  Scissors,
+  Settings,
   SkipBack,
   Square,
+  Upload,
   Waves,
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import type { DAWAction, DAWState } from "../hooks/useDAWState";
 import type { TransportPosition } from "../types/daw";
 
@@ -24,7 +27,10 @@ interface TopToolbarProps {
   onStop: () => void;
   onRecord: () => void;
   onRewind: () => void;
-  onExport: () => void;
+  onExport?: () => void;
+  onOpenExportModal?: () => void;
+  onImportFile?: (file: File) => void;
+  onOpenSettings?: () => void;
 }
 
 function beatsToPosition(beats: number, numerator: number): TransportPosition {
@@ -46,7 +52,12 @@ export function TopToolbar({
   onRecord,
   onRewind,
   onExport,
+  onOpenExportModal,
+  onImportFile,
+  onOpenSettings,
 }: TopToolbarProps) {
+  const importFileRef = useRef<HTMLInputElement>(null);
+
   const pos = beatsToPosition(
     playheadBeats,
     state.project.timeSignatureNumerator,
@@ -353,6 +364,37 @@ export function TopToolbar({
         </button>
       </div>
 
+      <div
+        className="w-px h-7 shrink-0"
+        style={{ background: "oklch(0.22 0 0)" }}
+      />
+
+      {/* Scissors Tool */}
+      <button
+        type="button"
+        data-ocid="toolbar.scissors_toggle"
+        className={`daw-btn gap-1 ${state.activeToolMode === "scissors" ? "active" : ""}`}
+        onClick={() =>
+          dispatch({
+            type: "SET_TOOL_MODE",
+            mode: state.activeToolMode === "scissors" ? "select" : "scissors",
+          })
+        }
+        title="Scissors — split clips at cursor"
+        style={
+          state.activeToolMode === "scissors"
+            ? {
+                background: "oklch(0.82 0.18 85 / 0.2)",
+                borderColor: "oklch(0.82 0.18 85 / 0.5)",
+                color: "oklch(0.82 0.18 85)",
+              }
+            : undefined
+        }
+      >
+        <Scissors size={11} />
+        <span className="text-[10px]">Split</span>
+      </button>
+
       <div className="flex-1" />
 
       {/* Project name */}
@@ -368,13 +410,46 @@ export function TopToolbar({
         style={{ background: "oklch(0.22 0 0)" }}
       />
 
+      {/* Import hidden input */}
+      <input
+        ref={importFileRef}
+        type="file"
+        accept=".mp3,.wav,.ogg,.flac,.aac,.m4a,.webm"
+        multiple
+        style={{ display: "none" }}
+        onChange={(e) => {
+          const files = Array.from(e.target.files ?? []);
+          for (const file of files) {
+            onImportFile?.(file);
+          }
+          e.target.value = "";
+        }}
+      />
+
+      {/* Import */}
+      <button
+        type="button"
+        data-ocid="transport.import_button"
+        className="daw-btn gap-1"
+        onClick={() => importFileRef.current?.click()}
+        title="Importar ficheiro de áudio"
+        style={{
+          background: "oklch(0.18 0 0)",
+          borderColor: "oklch(0.30 0 0)",
+          color: "oklch(0.78 0.15 195)",
+        }}
+      >
+        <Upload size={11} />
+        <span className="text-[10px]">Import</span>
+      </button>
+
       {/* Export */}
       <button
         type="button"
         data-ocid="export.button"
         className="daw-btn gap-1.5"
-        onClick={onExport}
-        title="Export/Render project"
+        onClick={onOpenExportModal ?? onExport}
+        title="Exportar / Importar projeto"
         style={{
           background: "oklch(0.22 0 0)",
           borderColor: "oklch(0.35 0 0)",
@@ -383,6 +458,26 @@ export function TopToolbar({
       >
         <Download size={12} />
         <span className="text-[10px] font-semibold">Export</span>
+      </button>
+
+      {/* Settings */}
+      <button
+        type="button"
+        data-ocid="toolbar.settings_button"
+        className="daw-btn w-8 h-7 p-0"
+        onClick={onOpenSettings}
+        title="Settings"
+        style={
+          state.bottomPanelTab === "settings"
+            ? {
+                background: "oklch(0.78 0.15 195 / 0.2)",
+                borderColor: "oklch(0.78 0.15 195 / 0.5)",
+                color: "oklch(0.78 0.15 195)",
+              }
+            : undefined
+        }
+      >
+        <Settings size={13} />
       </button>
     </header>
   );

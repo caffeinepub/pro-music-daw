@@ -1,4 +1,6 @@
 import { type FXParamDef, type FXSlot, FX_CATALOG } from "../types/daw";
+import { AnimatedAutoTuneUI } from "./AnimatedAutoTuneUI";
+import { AnimatedEQUI } from "./AnimatedEQUI";
 import { Knob } from "./Knob";
 
 interface FXPluginUIProps {
@@ -7,6 +9,14 @@ interface FXPluginUIProps {
 }
 
 export function FXPluginUI({ fx, onParamChange }: FXPluginUIProps) {
+  // Render specialized animated UIs for certain FX types
+  if (fx.type === "autotune") {
+    return <AnimatedAutoTuneUI fx={fx} onParamChange={onParamChange} />;
+  }
+  if (fx.type === "graphic_eq") {
+    return <AnimatedEQUI fx={fx} onParamChange={onParamChange} />;
+  }
+
   const def = FX_CATALOG.find((d) => d.type === fx.type);
   if (!def) return null;
 

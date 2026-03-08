@@ -1,5 +1,5 @@
 import { Plus } from "lucide-react";
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import type { DAWAction, DAWState } from "../hooks/useDAWState";
 import { TimelineCanvas } from "./TimelineCanvas";
 import { TrackHeader } from "./TrackHeader";
@@ -26,6 +26,8 @@ export function TrackArea({
   onDropFile,
   onPlayheadClick,
 }: TrackAreaProps) {
+  const headerScrollRef = useRef<HTMLDivElement>(null);
+
   const handleSelectFX = useCallback(
     (trackId: string) => {
       dispatch({ type: "SELECT_TRACK", id: trackId });
@@ -33,6 +35,13 @@ export function TrackArea({
     },
     [dispatch],
   );
+
+  // Sync scroll: keep header column scroll position in sync with timeline vertical scroll
+  useEffect(() => {
+    const header = headerScrollRef.current;
+    if (!header) return;
+    // Headers scroll is managed independently, this is a no-op placeholder
+  }, []);
 
   return (
     <div className="flex flex-1 overflow-hidden" style={{ minHeight: 0 }}>
@@ -73,7 +82,7 @@ export function TrackArea({
         </div>
 
         {/* Track headers */}
-        <div style={{ overflowY: "auto", flex: 1 }}>
+        <div ref={headerScrollRef} style={{ overflowY: "auto", flex: 1 }}>
           {state.tracks.map((track, index) => (
             <TrackHeader
               key={track.id}
@@ -126,12 +135,14 @@ export function TrackArea({
           scrollX={state.scrollX}
           playheadBeats={playheadBeats}
           isPlaying={isPlaying}
+          isRecording={state.tracks.some((t) => t.armed)}
           bpm={state.project.bpm}
           timeSigNumerator={state.project.timeSignatureNumerator}
           loopStart={state.loopStart}
           loopEnd={state.loopEnd}
           loopEnabled={state.loopEnabled}
           trackHeight={TRACK_HEIGHT}
+          activeToolMode={state.activeToolMode}
           dispatch={dispatch}
           onDropFile={onDropFile}
           onPlayheadClick={onPlayheadClick}

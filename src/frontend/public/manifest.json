@@ -1,0 +1,11 @@
+{
+  "name": "Pro Music DAW",
+  "short_name": "DAW Studio",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1a1a1a",
+  "theme_color": "#00b4d8",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}
